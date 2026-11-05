@@ -111,6 +111,7 @@ app.post("/request-code", async (req, res) => {
     res.status(500).json({ error: "Не удалось отправить код" });
   }
 });
+});
 
 // Проверка кода
 app.post("/verify-code", async (req, res) => {
