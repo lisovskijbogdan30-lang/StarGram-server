@@ -1,0 +1,14 @@
+
+{
+  "name": "stargram-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "grammy": "^1.35.0"
+  }
+}
