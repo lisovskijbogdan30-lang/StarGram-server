@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js"
-l"dependencies": {
+l
+    {  "dependencies": {
   "express": "^4.21.2",
   "grammy": "^1.35.0",
   "firebase-admin": "^13.5.0"
