@@ -13,35 +13,50 @@ if (!BOT_TOKEN) {
 }
 
 const bot = new Bot(BOT_TOKEN);
+const serviceAccount = JSON.parse(
+  process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+);
 
-const users = new Map();
-const codes = new Map();
-const cooldowns = new Map();
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: process.env.FIREBASE_DATABASE_URL
+});
 
-function createNumber() {
-  let number;
+const db = admin.database();
 
-  do {
-    number = "SG" + crypto.randomInt(10000, 100000);
-  } while (
-    [...users.values()].some(user => user.number === number)
-  );
 
-  return number;
+async function createNumber(telegramId) {
+  while (true) {
+    const number = "SG" + crypto.randomInt(10000, 100000);
+
+    const result = await db.ref("numberToTelegramId/" + number)
+      .transaction(current => {
+        return current === null ? telegramId : undefined;
+      });
+
+    if (result.committed) {
+      await db.ref("users/" + telegramId).set({
+        number: number,
+        createdAt: Date.now()
+      });
+
+      return number;
+    } 
+  }
 }
 
 // Регистрация через Telegram-бота
 bot.command("start", async (ctx) => {
   const telegramId = String(ctx.from.id);
 
-  let user = users.get(telegramId);
+  const userRef = db.ref("users/" + telegramId);
+  const snapshot = await userRef.get();
 
-  if (!user) {
-    user = {
-      number: createNumber()
-    };
+  let user = snapshot.val();
 
-    users.set(telegramId, user);
+  if (!user || !user.number) {
+    const number = await createNumber(telegramId);
+    user = { number };
   }
 
   await ctx.reply(
@@ -54,43 +69,33 @@ app.post("/request-code", async (req, res) => {
   const { number } = req.body;
 
   if (typeof number !== "string") {
-    return res.status(400).json({
-      error: "Введите номер StarGram"
-    });
+    return res.status(400).json({ error: "Введите номер StarGram" });
   }
 
-  const entry = [...users.entries()].find(
-    ([, user]) => user.number === number
-  );
+  const snapshot = await db.ref("numberToTelegramId/" + number).get();
+  const telegramId = snapshot.val();
 
-  if (!entry) {
-    return res.status(404).json({
-      error: "Аккаунт не найден"
-    });
+  if (!telegramId) {
+    return res.status(404).json({ error: "Аккаунт не найден" });
   }
 
-  const [telegramId] = entry;
+  const cooldownRef = db.ref("requestLimits/" + number);
+  const cooldownSnapshot = await cooldownRef.get();
+  const nextAllowedAt = cooldownSnapshot.val();
 
-  if (
-    cooldowns.has(number) &&
-    Date.now() < cooldowns.get(number)
-  ) {
-    return res.status(429).json({
-      error: "Подождите перед повторным запросом"
-    });
+  if (nextAllowedAt && Date.now() < nextAllowedAt) {
+    return res.status(429).json({ error: "Подождите перед повторным запросом" });
   }
 
-  const code = String(
-    crypto.randomInt(10000, 100000)
-  );
+  const code = String(crypto.randomInt(10000, 100000));
 
-  codes.set(number, {
-    code,
-    expires: Date.now() + 5 * 60 * 1000,
+  await db.ref("loginCodes/" + number).set({
+    codeHash: crypto.createHash("sha256").update(code).digest("hex"),
+    expiresAt: Date.now() + 5 * 60 * 1000,
     attempts: 0
   });
 
-  cooldowns.set(number, Date.now() + 60 * 1000);
+  await cooldownRef.set(Date.now() + 60 * 1000);
 
   try {
     await bot.api.sendMessage(
@@ -98,55 +103,52 @@ app.post("/request-code", async (req, res) => {
       `Код входа в StarGram: ${code}\n\nОн действует 5 минут. Никому его не сообщай.`
     );
 
-    res.json({
-      success: true,
-      message: "Код отправлен"
-    });
+    res.json({ success: true, message: "Код отправлен" });
   } catch {
-    codes.delete(number);
-
-    res.status(500).json({
-      error: "Не удалось отправить код"
-    });
+    await db.ref("loginCodes/" + number).remove();
+    res.status(500).json({ error: "Не удалось отправить код" });
   }
 });
 
 // Проверка кода
-app.post("/verify-code", (req, res) => {
+app.post("/verify-code", async (req, res) => {
   const { number, code } = req.body;
-  const saved = codes.get(number);
 
-  if (!saved || saved.expires < Date.now()) {
-    codes.delete(number);
-
-    return res.status(401).json({
-      error: "Код истёк или не найден"
-    });
+  if (typeof number !== "string" || typeof code !== "string") {
+    return res.status(400).json({ error: "Введите номер и код" });
   }
 
-  saved.attempts++;
+  const codeRef = db.ref("loginCodes/" + number);
+  const snapshot = await codeRef.get();
+  const saved = snapshot.val();
 
-  if (saved.attempts > 5) {
-    codes.delete(number);
-
-    return res.status(429).json({
-      error: "Слишком много попыток"
-    });
+  if (!saved || saved.expiresAt < Date.now()) {
+    await codeRef.remove();
+    return res.status(401).json({ error: "Код истёк или не найден" });
   }
 
-  if (saved.code !== String(code)) {
-    return res.status(401).json({
-      error: "Неверный код"
-    });
+  if (saved.attempts >= 5) {
+    await codeRef.remove();
+    return res.status(429).json({ error: "Слишком много попыток" });
   }
 
-  codes.delete(number);
+  const inputHash = crypto.createHash("sha256")
+    .update(code)
+    .digest("hex");
+
+  if (saved.codeHash !== inputHash) {
+    await codeRef.child("attempts").transaction(value => (value || 0) + 1);
+    return res.status(401).json({ error: "Неверный код" });
+  }
+
+  await codeRef.remove();
 
   res.json({
     success: true,
     message: "Код подтверждён"
   });
 });
+
 
 // Проверка сервера
 app.get("/", (req, res) => {
