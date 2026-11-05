@@ -140,12 +140,34 @@ app.post("/verify-code", async (req, res) => {
     return res.status(401).json({ error: "Неверный код" });
   }
 
-  await codeRef.remove();
+  const userSnapshot = await db.ref("numberToTelegramId/" + number).get();
+const telegramId = userSnapshot.val();
 
-  res.json({
-    success: true,
-    message: "Код подтверждён"
-  });
+if (!telegramId) {
+  return res.status(404).json({ error: "Аккаунт не найден" });
+}
+
+const sessionToken = crypto.randomBytes(32).toString("hex");
+
+const tokenHash = crypto.createHash("sha256")
+  .update(sessionToken)
+  .digest("hex");
+
+const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+await db.ref("sessions/" + tokenHash).set({
+  telegramId,
+  number,
+  createdAt: Date.now(),
+  expiresAt
+});
+
+await codeRef.remove();
+
+res.json({
+  success: true,
+  sessionToken,
+  expiresAt
 });
 
 
