@@ -26,8 +26,9 @@ const db = admin.database();
 
 
 async function createNumber(telegramId) {
-  while (true) 
+  while (true) {
     const number = "+7" + "9" + crypto.randomInt(100000000, 1000000000);
+
     const result = await db.ref("numberToTelegramId/" + number)
       .transaction(current => {
         return current === null ? telegramId : undefined;
@@ -40,10 +41,9 @@ async function createNumber(telegramId) {
       });
 
       return number;
-    } 
+    }
   }
 }
-
 // Регистрация через Telegram-бота
 bot.command("start", async (ctx) => {
   const telegramId = String(ctx.from.id);
