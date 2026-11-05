@@ -73,8 +73,9 @@ app.post("/request-code", async (req, res) => {
   if (typeof number !== "string") {
     return res.status(400).json({ error: "Введите номер StarGram" });
   }
+  const numberKey = number.replace(/\+/g, "");
 
-  const snapshot = await db.ref("numberToTelegramId/" + number).get();
+const snapshot = await db.ref("numberToTelegramId/" + numberKey).get();
   const telegramId = snapshot.val();
 
   if (!telegramId) {
