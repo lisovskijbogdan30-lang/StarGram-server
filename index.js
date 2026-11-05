@@ -26,9 +26,8 @@ const db = admin.database();
 
 
 async function createNumber(telegramId) {
-  while (true) {
-    const number = "SG" + crypto.randomInt(10000, 100000);
-
+  while (true) 
+    const number = "+7" + "9" + crypto.randomInt(100000000, 1000000000);
     const result = await db.ref("numberToTelegramId/" + number)
       .transaction(current => {
         return current === null ? telegramId : undefined;
