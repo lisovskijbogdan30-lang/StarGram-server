@@ -1,3 +1,4 @@
+
 import express from "express";
 import { Bot } from "grammy";
 import crypto from "node:crypto";
@@ -66,6 +67,8 @@ bot.command("start", async (ctx) => {
 // Запрос кода входа
 app.post("/request-code", async (req, res) => {
   const { number } = req.body;
+  console.log("Получен номер:", number);
+  
 
   if (typeof number !== "string") {
     return res.status(400).json({ error: "Введите номер StarGram" });
